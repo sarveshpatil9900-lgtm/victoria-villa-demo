@@ -23,26 +23,107 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Header shadow once the page scrolls
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Hero headline: wrap each word so it can rise into place
+function splitWords(node, counter) {
+  [...node.childNodes].forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const frag = document.createDocumentFragment();
+      child.textContent.split(/(\s+)/).forEach((part) => {
+        if (!part) return;
+        if (/^\s+$/.test(part)) { frag.append(" "); return; }
+        const outer = document.createElement("span");
+        const inner = document.createElement("span");
+        outer.className = "w";
+        inner.style.setProperty("--i", counter.n++);
+        inner.textContent = part;
+        outer.append(inner);
+        frag.append(outer);
+      });
+      child.replaceWith(frag);
+    } else {
+      splitWords(child, counter);
+    }
+  });
+}
+document.querySelectorAll("[data-split]").forEach((el) => splitWords(el, { n: 0 }));
+
+// Header turns solid, progress bar fills and the hero photo drifts as the page scrolls
 const header = document.querySelector(".site-header");
-const onScroll = () => header.classList.toggle("is-scrolled", window.scrollY > 8);
-window.addEventListener("scroll", onScroll, { passive: true });
+const progress = document.querySelector(".progress");
+const heroMedia = document.querySelector(".hero-media");
+let ticking = false;
+function onScroll() {
+  const y = window.scrollY;
+  header.classList.toggle("is-scrolled", y > 40);
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  progress.style.setProperty("--p", max > 0 ? (y / max).toFixed(4) : 0);
+  if (!reduceMotion && heroMedia && y < window.innerHeight * 1.2) {
+    heroMedia.style.transform = `translate3d(0, ${y * 0.3}px, 0)`;
+  }
+  ticking = false;
+}
+window.addEventListener("scroll", () => {
+  if (!ticking) { ticking = true; requestAnimationFrame(onScroll); }
+}, { passive: true });
 onScroll();
 
-// Gentle reveal as sections come into view
-const reveals = document.querySelectorAll(".reveal");
+// Numbers count up the first time they come into view
+function countUp(el) {
+  const target = Number(el.dataset.count);
+  if (reduceMotion) return;
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min((now - start) / 1400, 1);
+    el.textContent = Math.round(target * (1 - Math.pow(1 - t, 3)));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  el.textContent = "0";
+  requestAnimationFrame(step);
+}
+
+// Reveal sections, photos and numbers as they come into view
+const reveals = document.querySelectorAll(".reveal, .reveal-img, [data-count]");
 if ("IntersectionObserver" in window) {
   const io = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (entry.isIntersecting) {
-        entry.target.classList.add("is-visible");
+        if (entry.target.dataset.count) countUp(entry.target);
+        else entry.target.classList.add("is-visible");
         io.unobserve(entry.target);
       }
     });
   }, { rootMargin: "0px 0px -8% 0px" });
   reveals.forEach((el) => io.observe(el));
+
+  // Underline the menu link for the section on screen
+  const links = [...document.querySelectorAll(".site-nav ul a")];
+  const spy = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        links.forEach((a) => a.classList.toggle("is-active", a.getAttribute("href") === `#${entry.target.id}`));
+      }
+    });
+  }, { rootMargin: "-45% 0px -50% 0px" });
+  links.forEach((a) => {
+    const section = document.querySelector(a.getAttribute("href"));
+    if (section) spy.observe(section);
+  });
 } else {
   reveals.forEach((el) => el.classList.add("is-visible"));
+}
+
+// "View" bubble that follows the mouse over the gallery
+const cursor = document.querySelector(".cursor-view");
+if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+  const grid = document.getElementById("gallery-grid");
+  grid.addEventListener("pointermove", (e) => {
+    cursor.style.setProperty("--x", `${e.clientX}px`);
+    cursor.style.setProperty("--y", `${e.clientY}px`);
+    cursor.classList.toggle("is-on", Boolean(e.target.closest("button")));
+  });
+  grid.addEventListener("pointerleave", () => cursor.classList.remove("is-on"));
 }
 
 // Gallery lightbox
@@ -65,6 +146,7 @@ buttons.forEach((btn, i) => {
   btn.setAttribute("aria-label", `View larger: ${btn.querySelector("img").alt}`);
   btn.addEventListener("click", () => {
     opener = btn;
+    cursor.classList.remove("is-on");
     show(i);
     if (typeof box.showModal === "function") {
       box.showModal();
